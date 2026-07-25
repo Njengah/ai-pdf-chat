@@ -14,8 +14,8 @@ Chat with uploaded PDFs using retrieval-augmented generation (RAG).
 2. **PR2:** Models CRUD (OpenAI + Anthropic, server-side keys)  
 3. **PR3:** Chat switcher + history + export  
 4. **PR4:** Streaming + RAG steps  
-5. **PR5 (current):** Multi-upload + PDF viewer  
-6. **PR6:** Theme + danger zone polish
+5. **PR5:** Multi-upload + PDF viewer  
+6. **PR6 (current):** Theme + danger zone polish ✅
 
 ## Layout
 
@@ -67,7 +67,9 @@ npm run dev
 | PATCH/DELETE | `/api/chat/sessions/{id}` | Rename / delete chat |
 | GET | `/api/chat/sessions/{id}/export` | Export chat as Markdown |
 | GET | `/api/chat/{session_id}` | Fetch full session |
-| GET | `/api/settings/status` | Settings shell / storage info |
+| GET | `/api/settings/status` | Settings / storage info |
+| DELETE | `/api/settings/chats` | Clear all chat sessions |
+| DELETE | `/api/settings/library` | Clear all PDFs for user |
 | GET/POST | `/api/models` | List / create LLM models |
 | PATCH/DELETE | `/api/models/{id}` | Update / delete model |
 | POST | `/api/models/{id}/default` | Set default chat/embedding model |

@@ -14,6 +14,8 @@ def test_settings_status_reports_sqlite(client):
     assert res.status_code == 200
     body = res.json()
     assert body["storage"] == "sqlite"
-    assert "models" in body["sections"]
-    assert "appearance" in body["sections"]
-    assert "danger" in body["sections"]
+    assert body["sections"]["models"]["status"] == "ready"
+    assert body["sections"]["appearance"]["status"] == "ready"
+    assert body["sections"]["danger"]["status"] == "ready"
+    assert "workspace" in body
+
