@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
-import { getSettingsStatus, SettingsStatus } from "./api";
+import {
+  clearChats,
+  clearLibrary,
+  getSettingsStatus,
+  SettingsStatus,
+} from "./api";
 import ModelsPanel from "./ModelsPanel";
+import { applyTheme, getTheme, ThemeMode } from "./theme";
 
 type Tab = "models" | "appearance" | "danger";
 
@@ -12,18 +18,65 @@ const TABS: { id: Tab; label: string }[] = [
 
 type Props = {
   onBack: () => void;
+  onWorkspaceCleared?: () => void;
+  pushToast?: (text: string, tone?: "ok" | "error") => void;
 };
 
-export default function Settings({ onBack }: Props) {
+export default function Settings({ onBack, onWorkspaceCleared, pushToast }: Props) {
   const [tab, setTab] = useState<Tab>("models");
   const [status, setStatus] = useState<SettingsStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemeMode>(getTheme());
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    const next = await getSettingsStatus();
+    setStatus(next);
+  }
 
   useEffect(() => {
-    getSettingsStatus()
-      .then(setStatus)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load settings"));
+    refresh().catch((err) =>
+      setError(err instanceof Error ? err.message : "Failed to load settings")
+    );
   }, [tab]);
+
+  function onThemeChange(next: ThemeMode) {
+    setTheme(next);
+    applyTheme(next);
+    pushToast?.(next === "dark" ? "Dark theme on" : "Light theme on");
+  }
+
+  async function onClearChats() {
+    if (!confirm("Delete all chat history? This cannot be undone.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await clearChats();
+      await refresh();
+      onWorkspaceCleared?.();
+      pushToast?.(`Cleared ${res.deleted_sessions} chat(s)`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to clear chats");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onClearLibrary() {
+    if (!confirm("Delete all PDFs and chunks? This cannot be undone.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await clearLibrary();
+      await refresh();
+      onWorkspaceCleared?.();
+      pushToast?.(`Removed ${res.deleted_documents} document(s)`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to clear library");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="settings-shell">
@@ -59,25 +112,71 @@ export default function Settings({ onBack }: Props) {
           {tab === "appearance" && (
             <div className="settings-card">
               <h2>Appearance</h2>
-              <p className="muted">Theme and display preferences for the workspace.</p>
-              <div className="coming-soon">
-                <strong>Coming in PR6</strong>
-                <span>
-                  {status?.sections.appearance.note || "Light / dark theme toggle."}
-                </span>
+              <p className="muted">Choose a theme for this browser. Preference is saved locally.</p>
+              <div className="theme-grid">
+                <button
+                  type="button"
+                  className={`theme-card ${theme === "light" ? "active" : ""}`}
+                  onClick={() => onThemeChange("light")}
+                >
+                  <span className="theme-swatch light" />
+                  <strong>Light</strong>
+                  <small>Bright workspace</small>
+                </button>
+                <button
+                  type="button"
+                  className={`theme-card ${theme === "dark" ? "active" : ""}`}
+                  onClick={() => onThemeChange("dark")}
+                >
+                  <span className="theme-swatch dark" />
+                  <strong>Dark</strong>
+                  <small>Low-glare night mode</small>
+                </button>
               </div>
             </div>
           )}
 
           {tab === "danger" && (
-            <div className="settings-card">
+            <div className="settings-card danger-card">
               <h2>Danger zone</h2>
-              <p className="muted">Reset chats or clear your PDF library.</p>
-              <div className="coming-soon danger">
-                <strong>Coming in PR6</strong>
-                <span>
-                  {status?.sections.danger.note || "Destructive reset actions."}
-                </span>
+              <p className="muted">These actions permanently delete workspace data for your account.</p>
+
+              <div className="danger-row">
+                <div>
+                  <strong>Clear all chats</strong>
+                  <small>
+                    {status?.workspace
+                      ? `${status.workspace.session_count} session(s)`
+                      : "Removes chat history"}
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  className="btn-danger"
+                  disabled={busy}
+                  onClick={onClearChats}
+                >
+                  Clear chats
+                </button>
+              </div>
+
+              <div className="danger-row">
+                <div>
+                  <strong>Clear PDF library</strong>
+                  <small>
+                    {status?.workspace
+                      ? `${status.workspace.document_count} document(s)`
+                      : "Removes uploads and chunks"}
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  className="btn-danger"
+                  disabled={busy}
+                  onClick={onClearLibrary}
+                >
+                  Clear library
+                </button>
               </div>
             </div>
           )}

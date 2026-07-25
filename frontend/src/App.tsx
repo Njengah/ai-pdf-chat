@@ -22,6 +22,7 @@ import {
 } from "./api";
 import PdfViewer from "./PdfViewer";
 import Settings from "./Settings";
+import ToastStack, { ToastMessage } from "./Toast";
 
 type UploadItem = {
   id: string;
@@ -64,8 +65,15 @@ export default function App() {
     filename: string;
     page: number;
   } | null>(null);
+  const [booting, setBooting] = useState(false);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  function pushToast(text: string, tone: "ok" | "error" = "ok") {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setToasts((prev) => [...prev, { id, text, tone }]);
+  }
 
   async function refreshDocs() {
     setDocs(await listDocuments());
@@ -87,9 +95,13 @@ export default function App() {
 
   useEffect(() => {
     if (!authed) return;
-    Promise.all([refreshDocs(), refreshSessions(), refreshModels()]).catch((err) =>
-      setError(err.message)
-    );
+    setBooting(true);
+    Promise.all([refreshDocs(), refreshSessions(), refreshModels()])
+      .catch((err) => {
+        setError(err.message);
+        pushToast(err.message, "error");
+      })
+      .finally(() => setBooting(false));
   }, [authed]);
 
   useEffect(() => {
@@ -104,8 +116,11 @@ export default function App() {
       if (mode === "login") await login(email, password);
       else await register(email, password);
       setAuthed(true);
+      pushToast(mode === "login" ? "Signed in" : "Account created");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Auth failed");
+      const message = err instanceof Error ? err.message : "Auth failed";
+      setError(message);
+      pushToast(message, "error");
     } finally {
       setBusy(false);
     }
@@ -163,6 +178,9 @@ export default function App() {
     if (fileRef.current) fileRef.current.value = "";
     if (failures.length) {
       setError(`${failures.length} upload(s) failed`);
+      pushToast(`${failures.length} upload(s) failed`, "error");
+    } else {
+      pushToast(`Uploaded ${files.length} PDF${files.length > 1 ? "s" : ""}`);
     }
     window.setTimeout(() => {
       setUploads((prev) => prev.filter((u) => u.status === "uploading"));
@@ -409,12 +427,28 @@ export default function App() {
 
   if (page === "settings") {
     return (
-      <Settings
-        onBack={() => {
-          setPage("chat");
-          refreshModels().catch(() => undefined);
-        }}
-      />
+      <>
+        <Settings
+          onBack={() => {
+            setPage("chat");
+            refreshModels().catch(() => undefined);
+            refreshDocs().catch(() => undefined);
+            refreshSessions().catch(() => undefined);
+          }}
+          onWorkspaceCleared={() => {
+            newChat();
+            setDocs([]);
+            setSessions([]);
+            setSelected([]);
+            setViewer(null);
+          }}
+          pushToast={pushToast}
+        />
+        <ToastStack
+          toasts={toasts}
+          onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
+        />
+      </>
     );
   }
 
@@ -441,36 +475,46 @@ export default function App() {
             <h3>Chats</h3>
           </div>
           <ul className="session-list">
-            {sessions.map((s) => (
-              <li key={s.id} className={sessionId === s.id ? "active" : ""}>
-                <button type="button" className="session-main" onClick={() => openSession(s.id)}>
-                  <strong>{s.title}</strong>
-                  <small>
-                    {s.message_count} msgs
-                    {s.preview ? ` · ${s.preview.slice(0, 40)}` : ""}
-                  </small>
-                </button>
-                <div className="session-actions">
-                  <button
-                    type="button"
-                    className="btn-icon"
-                    title="Rename"
-                    onClick={() => onRenameSession(s.id, s.title)}
-                  >
-                    ✎
+            {booting &&
+              [0, 1, 2].map((i) => (
+                <li key={`sk-s-${i}`} className="skeleton-card">
+                  <div className="skeleton line" />
+                  <div className="skeleton line short" />
+                </li>
+              ))}
+            {!booting &&
+              sessions.map((s) => (
+                <li key={s.id} className={sessionId === s.id ? "active" : ""}>
+                  <button type="button" className="session-main" onClick={() => openSession(s.id)}>
+                    <strong>{s.title}</strong>
+                    <small>
+                      {s.message_count} msgs
+                      {s.preview ? ` · ${s.preview.slice(0, 40)}` : ""}
+                    </small>
                   </button>
-                  <button
-                    type="button"
-                    className="btn-icon"
-                    title="Delete"
-                    onClick={() => onDeleteSession(s.id)}
-                  >
-                    ×
-                  </button>
-                </div>
-              </li>
-            ))}
-            {sessions.length === 0 && <li className="empty-docs">No chats yet.</li>}
+                  <div className="session-actions">
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      title="Rename"
+                      onClick={() => onRenameSession(s.id, s.title)}
+                    >
+                      ✎
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      title="Delete"
+                      onClick={() => onDeleteSession(s.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </li>
+              ))}
+            {!booting && sessions.length === 0 && (
+              <li className="empty-docs">No chats yet. Ask something to start.</li>
+            )}
           </ul>
         </div>
 
@@ -772,6 +816,11 @@ export default function App() {
           onPageChange={(next) => setViewer((prev) => (prev ? { ...prev, page: next } : prev))}
         />
       )}
+
+      <ToastStack
+        toasts={toasts}
+        onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
+      />
     </div>
   );
 }

@@ -1,4 +1,5 @@
-:root {
+:root,
+html[data-theme="light"] {
   --bg: #eef2f6;
   --bg-deep: #dfe7f0;
   --panel: #ffffff;
@@ -11,6 +12,51 @@
   --shadow: 0 18px 40px rgba(15, 23, 36, 0.08);
   --radius: 14px;
   --font: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+  --input-bg: #fff;
+  --soft: #f8fafc;
+}
+
+html[data-theme="dark"] {
+  --bg: #0f1724;
+  --bg-deep: #0b1220;
+  --panel: #162033;
+  --ink: #e8eef7;
+  --muted: #9aa8b8;
+  --line: #2a3a4f;
+  --accent: #2dd4bf;
+  --accent-soft: rgba(45, 212, 191, 0.14);
+  --danger: #f97171;
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  --input-bg: #111b2c;
+  --soft: #132033;
+}
+
+html[data-theme="dark"] body {
+  background:
+    radial-gradient(900px 420px at 0% 0%, rgba(45, 212, 191, 0.12), transparent 55%),
+    radial-gradient(700px 380px at 100% 10%, rgba(59, 130, 246, 0.1), transparent 50%),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg-deep) 100%);
+}
+
+html[data-theme="dark"] .auth-panel,
+html[data-theme="dark"] .sidebar,
+html[data-theme="dark"] .chat-top,
+html[data-theme="dark"] .settings-shell,
+html[data-theme="dark"] .pdf-viewer {
+  background: rgba(15, 23, 36, 0.78);
+}
+
+html[data-theme="dark"] .stack input,
+html[data-theme="dark"] .form-grid input,
+html[data-theme="dark"] .form-grid select,
+html[data-theme="dark"] .model-switch select,
+html[data-theme="dark"] .composer {
+  background: var(--input-bg);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .msg.user .msg-body {
+  background: #134e4a;
 }
 
 * {
@@ -700,6 +746,142 @@ button:disabled {
 .pdf-viewer-body .react-pdf__Page {
   box-shadow: 0 10px 30px rgba(15, 23, 36, 0.12);
   border: 1px solid var(--line);
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.theme-card {
+  display: grid;
+  gap: 0.35rem;
+  text-align: left;
+  padding: 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  color: var(--ink);
+}
+
+.theme-card.active {
+  border-color: #9ed4d1;
+  background: var(--accent-soft);
+}
+
+.theme-swatch {
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+
+.theme-swatch.light {
+  background: linear-gradient(135deg, #f8fafc, #dfe7f0);
+}
+
+.theme-swatch.dark {
+  background: linear-gradient(135deg, #0f1724, #1e293b);
+}
+
+.theme-card small {
+  color: var(--muted);
+}
+
+.danger-card .danger-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.danger-card .danger-row:first-of-type {
+  border-top: 0;
+}
+
+.danger-row strong,
+.danger-row small {
+  display: block;
+}
+
+.danger-row small {
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid rgba(180, 35, 24, 0.35);
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+  font-weight: 700;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.toast-stack {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 50;
+  display: grid;
+  gap: 0.5rem;
+  width: min(320px, calc(100vw - 2rem));
+}
+
+.toast {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  animation: rise 0.25s ease both;
+}
+
+.toast.ok {
+  border-color: #9ed4d1;
+}
+
+.toast.error {
+  border-color: rgba(180, 35, 24, 0.35);
+  color: var(--danger);
+}
+
+.skeleton-card {
+  padding: 0.7rem;
+  border-radius: 12px;
+  background: var(--soft);
+}
+
+.skeleton.line {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--line), var(--soft), var(--line));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+.skeleton.line.short {
+  width: 55%;
+  margin-top: 0.45rem;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .chat-top h1 {

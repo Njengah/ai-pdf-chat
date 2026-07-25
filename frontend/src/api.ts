@@ -297,6 +297,10 @@ export type SettingsStatus = {
     default_chat: string | null;
     default_embedding: string | null;
   };
+  workspace?: {
+    session_count: number;
+    document_count: number;
+  };
   demo: { connected: boolean };
 };
 
@@ -326,6 +330,24 @@ export type LLMModelInput = {
 
 export async function getSettingsStatus(): Promise<SettingsStatus> {
   const res = await fetch("/api/settings/status", { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function clearChats(): Promise<{ deleted_sessions: number }> {
+  const res = await fetch("/api/settings/chats", {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function clearLibrary(): Promise<{ deleted_documents: number }> {
+  const res = await fetch("/api/settings/library", {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }

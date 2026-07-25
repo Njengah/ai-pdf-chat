@@ -327,6 +327,23 @@ class SQLiteStore:
             self.conn.commit()
             return True
 
+    def clear_sessions(self, owner_id: UUID | str) -> int:
+        with self.lock:
+            sessions = self.list_sessions(owner_id)
+            for session in sessions:
+                self.conn.execute("DELETE FROM messages WHERE session_id = ?", (session.id,))
+                self.conn.execute("DELETE FROM sessions WHERE id = ?", (session.id,))
+            self.conn.commit()
+            return len(sessions)
+
+    def clear_library(self, owner_id: UUID | str) -> int:
+        docs = self.list_documents(owner_id)
+        removed = 0
+        for doc in docs:
+            if self.delete_document(doc.id, owner_id):
+                removed += 1
+        return removed
+
     def append_messages(self, session_id: str, messages: list[dict[str, Any]]) -> SessionRecord:
         with self.lock:
             session = self.get_session(session_id)
