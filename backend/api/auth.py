@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from backend.api.deps import create_access_token, get_current_user, get_store
 from backend.config import Settings, get_settings
 from backend.models.schemas import TokenResponse, UserCreate, UserLogin, UserPublic
-from backend.models.store import MemoryStore, UserRecord
+from backend.models.store import SQLiteStore, UserRecord
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -25,7 +25,7 @@ def _to_public(user: UserRecord) -> UserPublic:
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def register(
     body: UserCreate,
-    store: Annotated[MemoryStore, Depends(get_store)],
+    store: Annotated[SQLiteStore, Depends(get_store)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TokenResponse:
     try:
@@ -39,7 +39,7 @@ def register(
 @router.post("/login", response_model=TokenResponse)
 def login(
     body: UserLogin,
-    store: Annotated[MemoryStore, Depends(get_store)],
+    store: Annotated[SQLiteStore, Depends(get_store)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TokenResponse:
     user = store.authenticate(body.email, body.password)

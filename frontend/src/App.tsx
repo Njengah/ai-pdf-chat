@@ -11,6 +11,7 @@ import {
   setToken,
   uploadDocument,
 } from "./api";
+import Settings from "./Settings";
 
 const PROMPTS = [
   "Summarize this document in 5 bullets",
@@ -31,6 +32,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
+  const [page, setPage] = useState<"chat" | "settings">("chat");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -192,6 +194,10 @@ export default function App() {
     );
   }
 
+  if (page === "settings") {
+    return <Settings onBack={() => setPage("chat")} />;
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -205,6 +211,9 @@ export default function App() {
 
         <button type="button" className="btn-secondary" onClick={newChat}>
           New chat
+        </button>
+        <button type="button" className="btn-text settings-link" onClick={() => setPage("settings")}>
+          Settings
         </button>
 
         <div className="sidebar-section">

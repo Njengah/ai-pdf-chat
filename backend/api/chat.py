@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from backend.api.deps import get_current_user, get_store
 from backend.config import Settings, get_settings
 from backend.models.schemas import ChatMessage, ChatRequest, ChatResponse, ChatSession
-from backend.models.store import MemoryStore, UserRecord
+from backend.models.store import SQLiteStore, UserRecord
 from backend.services.chat_engine import answer_question
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 async def chat(
     body: ChatRequest,
     user: Annotated[UserRecord, Depends(get_current_user)],
-    store: Annotated[MemoryStore, Depends(get_store)],
+    store: Annotated[SQLiteStore, Depends(get_store)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ChatResponse:
     try:
@@ -39,9 +39,9 @@ async def chat(
 def get_session(
     session_id: UUID,
     user: Annotated[UserRecord, Depends(get_current_user)],
-    store: Annotated[MemoryStore, Depends(get_store)],
+    store: Annotated[SQLiteStore, Depends(get_store)],
 ) -> ChatSession:
-    session = store.sessions.get(str(session_id))
+    session = store.get_session(session_id)
     if not session or session.owner_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     created = (

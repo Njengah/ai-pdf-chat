@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
     upload_dir: Path = Path("./data/uploads")
-    vector_store_path: Path = Path("./data/vector_store.json")
+    database_path: Path = Path("./data/app.db")
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     access_token_expire_minutes: int = 60 * 24
     chunk_size: int = 800

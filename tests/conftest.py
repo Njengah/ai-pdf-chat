@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 from backend.api import deps
 from backend.config import get_settings
 from backend.main import app
-from backend.models.store import MemoryStore
+from backend.models.store import SQLiteStore
 from backend.seed import seed_demo_user
 
 
@@ -26,13 +26,13 @@ def client(monkeypatch):
     base.mkdir(parents=True, exist_ok=True)
 
     upload_dir = base / "uploads"
-    store_path = base / "vector_store.json"
+    db_path = base / "app.db"
     monkeypatch.setenv("UPLOAD_DIR", str(upload_dir))
-    monkeypatch.setenv("VECTOR_STORE_PATH", str(store_path))
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
     monkeypatch.setenv("APP_SECRET", "test-secret")
     monkeypatch.setenv("OPENAI_API_KEY", "")
     get_settings.cache_clear()
-    store = MemoryStore(store_path)
+    store = SQLiteStore(db_path)
     seed_demo_user(store)
     deps._store = store
 
@@ -40,5 +40,7 @@ def client(monkeypatch):
         yield test_client
 
     get_settings.cache_clear()
+    if deps._store is not None:
+        deps._store.close()
     deps._store = None
     shutil.rmtree(base, ignore_errors=True)

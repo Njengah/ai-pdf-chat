@@ -118,3 +118,21 @@ export async function askChat(
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }
+
+export type SettingsStatus = {
+  storage: string;
+  database_path: string;
+  upload_dir: string;
+  sections: {
+    models: { status: string; note: string };
+    appearance: { status: string; note: string };
+    danger: { status: string; note: string };
+  };
+  demo: { connected: boolean };
+};
+
+export async function getSettingsStatus(): Promise<SettingsStatus> {
+  const res = await fetch("/api/settings/status", { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}

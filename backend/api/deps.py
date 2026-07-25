@@ -9,18 +9,18 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
 from backend.config import Settings, get_settings
-from backend.models.store import MemoryStore, UserRecord
+from backend.models.store import SQLiteStore, UserRecord
 
 _security = HTTPBearer(auto_error=False)
-_store: Optional[MemoryStore] = None
+_store: Optional[SQLiteStore] = None
 
 
-def get_store(settings: Annotated[Settings, Depends(get_settings)]) -> MemoryStore:
+def get_store(settings: Annotated[Settings, Depends(get_settings)]) -> SQLiteStore:
     global _store
     if _store is None:
         from backend.seed import seed_demo_user
 
-        _store = MemoryStore(settings.vector_store_path)
+        _store = SQLiteStore(settings.database_path)
         seed_demo_user(_store)
     return _store
 
@@ -37,7 +37,7 @@ def create_access_token(user_id: str, settings: Settings) -> str:
 def get_current_user(
     credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(_security)],
     settings: Annotated[Settings, Depends(get_settings)],
-    store: Annotated[MemoryStore, Depends(get_store)],
+    store: Annotated[SQLiteStore, Depends(get_store)],
 ) -> UserRecord:
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
