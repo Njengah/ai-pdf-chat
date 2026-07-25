@@ -4,7 +4,8 @@ import {
   ChatSessionSummary,
   DocumentMeta,
   LLMModel,
-  askChat,
+  SourceChunk,
+  askChatStream,
   deleteDocument,
   deleteSession,
   exportSessionMarkdown,
@@ -45,6 +46,8 @@ export default function App() {
   const [modelId, setModelId] = useState<string>("");
   const [question, setQuestion] = useState("");
   const [page, setPage] = useState<"chat" | "settings">("chat");
+  const [stage, setStage] = useState<string | null>(null);
+  const [streamSources, setStreamSources] = useState<SourceChunk[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -127,17 +130,66 @@ export default function App() {
     setBusy(true);
     setError(null);
     setQuestion("");
+    setStage("Retrieving passages");
+    setStreamSources([]);
+
+    const userMsg: ChatMessage = {
+      role: "user",
+      content: q,
+      created_at: new Date().toISOString(),
+    };
+    const assistantMsg: ChatMessage = {
+      role: "assistant",
+      content: "",
+      sources: [],
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+
     try {
-      const res = await askChat(q, sessionId, selected, modelId || null);
-      setSessionId(res.session_id);
-      setMessages(res.messages);
-      setSessionTitle(res.title || "New chat");
-      if (res.model_id) setModelId(res.model_id);
+      await askChatStream(q, sessionId, selected, modelId || null, {
+        onStage: (_stage, label) => setStage(label),
+        onToken: (token) => {
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (!last || last.role !== "assistant") return prev;
+            next[next.length - 1] = { ...last, content: last.content + token };
+            return next;
+          });
+        },
+        onSources: (sources) => {
+          setStreamSources(sources);
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (!last || last.role !== "assistant") return prev;
+            next[next.length - 1] = { ...last, sources };
+            return next;
+          });
+        },
+        onDone: (payload) => {
+          setSessionId(payload.session_id);
+          setSessionTitle(payload.title || "New chat");
+          if (payload.model_id) setModelId(payload.model_id);
+          setMessages(payload.messages);
+          setStage(null);
+        },
+      });
       await refreshSessions();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chat failed");
+      setMessages((prev) => {
+        // Drop empty trailing assistant bubble on failure
+        if (prev.length && prev[prev.length - 1]?.role === "assistant" && !prev[prev.length - 1].content) {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
     } finally {
       setBusy(false);
+      setStage(null);
+      setStreamSources([]);
     }
   }
 
@@ -476,9 +528,29 @@ export default function App() {
             >
               Export MD
             </button>
-            <div className="status-pill">{busy ? "Thinking" : "Ready"}</div>
+            <div className="status-pill">{busy ? stage || "Thinking" : "Ready"}</div>
           </div>
         </header>
+
+        {busy && stage && (
+          <div className="rag-stages" aria-live="polite">
+            {["Retrieving passages", "Ranking context", "Generating answer"].map((label) => {
+              const active = stage === label;
+              const done =
+                (label === "Retrieving passages" &&
+                  (stage === "Ranking context" || stage === "Generating answer")) ||
+                (label === "Ranking context" && stage === "Generating answer");
+              return (
+                <span key={label} className={`rag-step ${active ? "active" : ""} ${done ? "done" : ""}`}>
+                  {label}
+                  {label === "Generating answer" && streamSources.length > 0
+                    ? ` · ${streamSources.length} sources`
+                    : ""}
+                </span>
+              );
+            })}
+          </div>
+        )}
 
         <div className="messages">
           {messages.length === 0 && !busy && (
@@ -529,20 +601,6 @@ export default function App() {
             </article>
           ))}
 
-          {busy && (
-            <article className="msg assistant typing">
-              <div className="msg-avatar" aria-hidden="true">
-                AI
-              </div>
-              <div className="msg-body">
-                <div className="dots" aria-label="Thinking">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-            </article>
-          )}
           <div ref={bottomRef} />
         </div>
 

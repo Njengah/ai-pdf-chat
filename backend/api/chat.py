@@ -5,7 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from backend.api.deps import get_current_user, get_store
 from backend.config import Settings, get_settings
@@ -18,7 +18,7 @@ from backend.models.schemas import (
     ChatSessionSummary,
 )
 from backend.models.store import SQLiteStore, UserRecord
-from backend.services.chat_engine import answer_question, session_to_markdown
+from backend.services.chat_engine import answer_question, session_to_markdown, stream_answer_question
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -116,6 +116,33 @@ async def chat(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/stream")
+async def chat_stream(
+    body: ChatRequest,
+    user: Annotated[UserRecord, Depends(get_current_user)],
+    store: Annotated[SQLiteStore, Depends(get_store)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> StreamingResponse:
+    generator = stream_answer_question(
+        store=store,
+        owner_id=UUID(user.id),
+        question=body.question,
+        document_ids=body.document_ids,
+        session_id=body.session_id,
+        model_id=body.model_id,
+        settings=settings,
+    )
+    return StreamingResponse(
+        generator,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/{session_id}", response_model=ChatSession)

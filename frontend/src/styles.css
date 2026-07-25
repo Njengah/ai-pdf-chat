@@ -482,6 +482,44 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+.rag-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.65rem 1.25rem 0;
+}
+
+.rag-step {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--muted);
+  background: #f1f5f9;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+}
+
+.rag-step.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: #9ed4d1;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.rag-step.done {
+  color: #0f766e;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
 .session-list {
   list-style: none;
   margin: 0;

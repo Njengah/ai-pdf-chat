@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import asyncio
+import json
+from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID, uuid4
 
 from backend.config import Settings, get_settings
 from backend.models.schemas import ChatMessage, ChatResponse, SourceChunk
 from backend.models.store import ChunkRecord, SQLiteStore
 from backend.services.embeddings import embed_texts, top_k_chunks
-from backend.services.llm_providers import chat_completion, resolve_model
+from backend.services.llm_providers import (
+    ResolvedModel,
+    chat_completion,
+    resolve_model,
+    stream_chat_completion,
+)
 
 
 SYSTEM_PROMPT = (
@@ -27,14 +35,12 @@ def _build_context(sources: list[SourceChunk]) -> str:
     return "\n\n".join(blocks) if blocks else "(no relevant context found)"
 
 
-async def _call_llm(
-    question: str,
-    context: str,
+def _resolve_chat_model(
     store: SQLiteStore,
     owner_id: UUID,
     settings: Settings,
     model_id: Optional[UUID] = None,
-) -> tuple[str, Optional[UUID]]:
+) -> tuple[Optional[ResolvedModel], Optional[UUID]]:
     chat_record = None
     used_model_id: Optional[UUID] = None
     if model_id:
@@ -46,23 +52,34 @@ async def _call_llm(
         chat_record = store.get_default_model(owner_id, "chat")
         if chat_record:
             used_model_id = UUID(chat_record.id)
+    return resolve_model(chat_record, "chat", settings), used_model_id
 
-    model = resolve_model(chat_record, "chat", settings)
 
-    if model is None or not model.api_key:
-        if "(no relevant context found)" in context:
-            return (
-                "I could not find relevant passages in your uploaded PDFs. "
-                "Upload a document or ask about something present in the file.",
-                used_model_id,
-            )
-        excerpt = context[:900]
+def _demo_answer(question: str, context: str) -> str:
+    if "(no relevant context found)" in context:
         return (
-            "(Local demo mode — add a chat model with API key in Settings → Models.)\n\n"
-            f"Based on the retrieved context:\n{excerpt}\n\n"
-            f"Question: {question}",
-            used_model_id,
+            "I could not find relevant passages in your uploaded PDFs. "
+            "Upload a document or ask about something present in the file."
         )
+    excerpt = context[:900]
+    return (
+        "(Local demo mode — add a chat model with API key in Settings → Models.)\n\n"
+        f"Based on the retrieved context:\n{excerpt}\n\n"
+        f"Question: {question}"
+    )
+
+
+async def _call_llm(
+    question: str,
+    context: str,
+    store: SQLiteStore,
+    owner_id: UUID,
+    settings: Settings,
+    model_id: Optional[UUID] = None,
+) -> tuple[str, Optional[UUID]]:
+    model, used_model_id = _resolve_chat_model(store, owner_id, settings, model_id)
+    if model is None or not model.api_key:
+        return _demo_answer(question, context), used_model_id
 
     user_prompt = (
         f"Context from PDFs:\n{context}\n\n"
@@ -73,18 +90,13 @@ async def _call_llm(
     return answer, used_model_id
 
 
-async def answer_question(
+async def _retrieve_sources(
     store: SQLiteStore,
     owner_id: UUID,
     question: str,
-    document_ids: Optional[list[UUID]] = None,
-    session_id: Optional[UUID] = None,
-    model_id: Optional[UUID] = None,
-    settings: Optional[Settings] = None,
-) -> ChatResponse:
-    settings = settings or get_settings()
-    session = store.get_or_create_session(owner_id, session_id)
-
+    document_ids: Optional[list[UUID]],
+    settings: Settings,
+) -> list[SourceChunk]:
     embed_record = store.get_default_model(owner_id, "embedding")
     embed_model = resolve_model(embed_record, "embedding", settings)
     query_vecs = await embed_texts([question], settings=settings, model=embed_model)
@@ -102,8 +114,7 @@ async def answer_question(
         k=settings.top_k,
         document_ids=allowed,
     )
-
-    sources = [
+    return [
         SourceChunk(
             document_id=UUID(chunk.document_id),
             filename=chunk.filename,
@@ -115,6 +126,19 @@ async def answer_question(
         if score > 0
     ]
 
+
+async def answer_question(
+    store: SQLiteStore,
+    owner_id: UUID,
+    question: str,
+    document_ids: Optional[list[UUID]] = None,
+    session_id: Optional[UUID] = None,
+    model_id: Optional[UUID] = None,
+    settings: Optional[Settings] = None,
+) -> ChatResponse:
+    settings = settings or get_settings()
+    session = store.get_or_create_session(owner_id, session_id)
+    sources = await _retrieve_sources(store, owner_id, question, document_ids, settings)
     answer, used_model_id = await _call_llm(
         question,
         _build_context(sources),
@@ -132,13 +156,11 @@ async def answer_question(
         sources=sources,
         created_at=now,
     )
-
     refreshed = store.append_messages(
         session.id,
         [user_msg.model_dump(mode="json"), assistant_msg.model_dump(mode="json")],
     )
     messages = [ChatMessage(**m) for m in refreshed.messages]
-
     return ChatResponse(
         session_id=UUID(session.id),
         answer=answer,
@@ -147,6 +169,87 @@ async def answer_question(
         title=refreshed.title,
         model_id=used_model_id,
     )
+
+
+def _sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+async def stream_answer_question(
+    store: SQLiteStore,
+    owner_id: UUID,
+    question: str,
+    document_ids: Optional[list[UUID]] = None,
+    session_id: Optional[UUID] = None,
+    model_id: Optional[UUID] = None,
+    settings: Optional[Settings] = None,
+) -> AsyncIterator[str]:
+    settings = settings or get_settings()
+    try:
+        session = store.get_or_create_session(owner_id, session_id)
+        yield _sse("stage", {"stage": "retrieving", "label": "Retrieving passages"})
+
+        sources = await _retrieve_sources(store, owner_id, question, document_ids, settings)
+        yield _sse("stage", {"stage": "ranking", "label": "Ranking context"})
+        await asyncio.sleep(0.05)
+        yield _sse(
+            "stage",
+            {
+                "stage": "generating",
+                "label": "Generating answer",
+                "source_count": len(sources),
+            },
+        )
+
+        context = _build_context(sources)
+        model, used_model_id = _resolve_chat_model(store, owner_id, settings, model_id)
+        answer_parts: list[str] = []
+
+        if model is None or not model.api_key:
+            answer = _demo_answer(question, context)
+            for i in range(0, len(answer), 24):
+                piece = answer[i : i + 24]
+                answer_parts.append(piece)
+                yield _sse("token", {"text": piece})
+                await asyncio.sleep(0.01)
+        else:
+            user_prompt = (
+                f"Context from PDFs:\n{context}\n\n"
+                f"Question: {question}\n\n"
+                "Answer using the context above."
+            )
+            async for piece in stream_chat_completion(model, SYSTEM_PROMPT, user_prompt):
+                answer_parts.append(piece)
+                yield _sse("token", {"text": piece})
+
+        answer = "".join(answer_parts).strip()
+        yield _sse("sources", {"sources": [s.model_dump(mode="json") for s in sources]})
+
+        now = datetime.utcnow()
+        user_msg = ChatMessage(role="user", content=question, created_at=now)
+        assistant_msg = ChatMessage(
+            role="assistant",
+            content=answer,
+            sources=sources,
+            created_at=now,
+        )
+        refreshed = store.append_messages(
+            session.id,
+            [user_msg.model_dump(mode="json"), assistant_msg.model_dump(mode="json")],
+        )
+        messages = [ChatMessage(**m) for m in refreshed.messages]
+        yield _sse(
+            "done",
+            {
+                "session_id": session.id,
+                "title": refreshed.title,
+                "model_id": str(used_model_id) if used_model_id else None,
+                "answer": answer,
+                "messages": [m.model_dump(mode="json") for m in messages],
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - surface to SSE client
+        yield _sse("error", {"detail": str(exc)})
 
 
 def session_to_markdown(session) -> str:
