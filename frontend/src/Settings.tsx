@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getSettingsStatus, SettingsStatus } from "./api";
+import ModelsPanel from "./ModelsPanel";
 
 type Tab = "models" | "appearance" | "danger";
 
@@ -22,7 +23,7 @@ export default function Settings({ onBack }: Props) {
     getSettingsStatus()
       .then(setStatus)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load settings"));
-  }, []);
+  }, [tab]);
 
   return (
     <div className="settings-shell">
@@ -53,21 +54,7 @@ export default function Settings({ onBack }: Props) {
         <section className="settings-panel">
           {error && <p className="error banner">{error}</p>}
 
-          {tab === "models" && (
-            <div className="settings-card">
-              <h2>Models</h2>
-              <p className="muted">
-                Add OpenAI and Anthropic models here. API keys stay on the server.
-              </p>
-              <div className="coming-soon">
-                <strong>Coming in PR2</strong>
-                <span>
-                  {status?.sections.models.note ||
-                    "Configure chat + embedding models without editing code."}
-                </span>
-              </div>
-            </div>
-          )}
+          {tab === "models" && <ModelsPanel />}
 
           {tab === "appearance" && (
             <div className="settings-card">
@@ -115,6 +102,22 @@ export default function Settings({ onBack }: Props) {
                     <code>{status.upload_dir}</code>
                   </dd>
                 </div>
+                {status.models && (
+                  <>
+                    <div>
+                      <dt>Models</dt>
+                      <dd>{status.models.count}</dd>
+                    </div>
+                    <div>
+                      <dt>Default chat</dt>
+                      <dd>{status.models.default_chat || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Default embed</dt>
+                      <dd>{status.models.default_embedding || "—"}</dd>
+                    </div>
+                  </>
+                )}
               </dl>
             </div>
           )}

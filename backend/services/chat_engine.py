@@ -4,12 +4,11 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
-import httpx
-
 from backend.config import Settings, get_settings
 from backend.models.schemas import ChatMessage, ChatResponse, SourceChunk
 from backend.models.store import ChunkRecord, SQLiteStore
 from backend.services.embeddings import embed_texts, top_k_chunks
+from backend.services.llm_providers import chat_completion, resolve_model
 
 
 SYSTEM_PROMPT = (
@@ -28,8 +27,11 @@ def _build_context(sources: list[SourceChunk]) -> str:
     return "\n\n".join(blocks) if blocks else "(no relevant context found)"
 
 
-async def _call_llm(question: str, context: str, settings: Settings) -> str:
-    if not settings.openai_api_key:
+async def _call_llm(question: str, context: str, store: SQLiteStore, owner_id: UUID, settings: Settings) -> str:
+    chat_record = store.get_default_model(owner_id, "chat")
+    model = resolve_model(chat_record, "chat", settings)
+
+    if model is None or not model.api_key:
         if "(no relevant context found)" in context:
             return (
                 "I could not find relevant passages in your uploaded PDFs. "
@@ -37,34 +39,17 @@ async def _call_llm(question: str, context: str, settings: Settings) -> str:
             )
         excerpt = context[:900]
         return (
-            f"(Local demo mode — set OPENAI_API_KEY for live LLM answers.)\n\n"
+            "(Local demo mode — add a chat model with API key in Settings → Models.)\n\n"
             f"Based on the retrieved context:\n{excerpt}\n\n"
             f"Question: {question}"
         )
 
-    headers = {
-        "Authorization": f"Bearer {settings.openai_api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": settings.openai_model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"Context from PDFs:\n{context}\n\n"
-                    f"Question: {question}\n\n"
-                    "Answer using the context above."
-                ),
-            },
-        ],
-        "temperature": 0.2,
-    }
-    async with httpx.AsyncClient(base_url=settings.openai_base_url, timeout=90.0) as client:
-        response = await client.post("/chat/completions", headers=headers, json=payload)
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
+    user_prompt = (
+        f"Context from PDFs:\n{context}\n\n"
+        f"Question: {question}\n\n"
+        "Answer using the context above."
+    )
+    return await chat_completion(model, SYSTEM_PROMPT, user_prompt)
 
 
 async def answer_question(
@@ -78,9 +63,11 @@ async def answer_question(
     settings = settings or get_settings()
     session = store.get_or_create_session(owner_id, session_id)
 
-    query_vecs = await embed_texts([question], settings=settings)
+    embed_record = store.get_default_model(owner_id, "embedding")
+    embed_model = resolve_model(embed_record, "embedding", settings)
+    query_vecs = await embed_texts([question], settings=settings, model=embed_model)
+
     allowed = {str(d) for d in document_ids} if document_ids else None
-    # Restrict to owner's documents
     owner_docs = {d.id for d in store.list_documents(owner_id)}
     if allowed is None:
         allowed = owner_docs
@@ -106,7 +93,7 @@ async def answer_question(
         if score > 0
     ]
 
-    answer = await _call_llm(question, _build_context(sources), settings)
+    answer = await _call_llm(question, _build_context(sources), store, owner_id, settings)
 
     now = datetime.utcnow()
     user_msg = ChatMessage(role="user", content=question, created_at=now)

@@ -5,10 +5,10 @@ import math
 import re
 from typing import Iterable, Optional
 
-import httpx
 import numpy as np
 
 from backend.config import Settings, get_settings
+from backend.services.llm_providers import ResolvedModel, create_embeddings
 from backend.services.pdf_parser import PageText
 
 
@@ -54,22 +54,12 @@ def _hash_embed(text: str, dims: int = 256) -> list[float]:
 async def embed_texts(
     texts: list[str],
     settings: Optional[Settings] = None,
+    model: Optional[ResolvedModel] = None,
 ) -> list[list[float]]:
     settings = settings or get_settings()
-    if not settings.openai_api_key:
+    if model is None or not model.api_key:
         return [_hash_embed(t) for t in texts]
-
-    headers = {
-        "Authorization": f"Bearer {settings.openai_api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {"model": settings.embedding_model, "input": texts}
-    async with httpx.AsyncClient(base_url=settings.openai_base_url, timeout=60.0) as client:
-        response = await client.post("/embeddings", headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()["data"]
-        data_sorted = sorted(data, key=lambda d: d["index"])
-        return [item["embedding"] for item in data_sorted]
+    return await create_embeddings(model, texts)
 
 
 def cosine_similarity(a: Iterable[float], b: Iterable[float]) -> float:

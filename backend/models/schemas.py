@@ -70,3 +70,37 @@ class ChatSession(BaseModel):
     owner_id: UUID
     messages: list[ChatMessage] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class LLMModelCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    provider: str = Field(pattern="^(openai|anthropic)$")
+    model_id: str = Field(min_length=1, max_length=200)
+    kind: str = Field(pattern="^(chat|embedding)$")
+    base_url: Optional[str] = None
+    api_key: str = Field(default="", max_length=500)
+    is_default: bool = False
+
+
+class LLMModelUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    provider: Optional[str] = Field(default=None, pattern="^(openai|anthropic)$")
+    model_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    kind: Optional[str] = Field(default=None, pattern="^(chat|embedding)$")
+    base_url: Optional[str] = None
+    api_key: Optional[str] = Field(default=None, max_length=500)
+    is_default: Optional[bool] = None
+
+
+class LLMModelPublic(BaseModel):
+    id: UUID
+    name: str
+    provider: str
+    model_id: str
+    kind: str
+    base_url: Optional[str] = None
+    api_key_masked: str = ""
+    has_api_key: bool = False
+    is_default: bool = False
+    created_at: datetime
+    updated_at: datetime

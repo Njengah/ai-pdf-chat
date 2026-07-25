@@ -13,19 +13,29 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 @router.get("/status")
 def settings_status(
-    _user: Annotated[UserRecord, Depends(get_current_user)],
+    user: Annotated[UserRecord, Depends(get_current_user)],
     store: Annotated[SQLiteStore, Depends(get_store)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict:
-    """PR1 shell: storage info only. Models arrive in PR2."""
+    models = store.list_models(user.id)
+    chat_default = store.get_default_model(user.id, "chat")
+    embed_default = store.get_default_model(user.id, "embedding")
     return {
         "storage": "sqlite",
         "database_path": str(settings.database_path),
         "upload_dir": str(settings.upload_dir),
         "sections": {
-            "models": {"status": "coming_soon", "note": "Configure OpenAI & Anthropic models in PR2"},
+            "models": {
+                "status": "ready",
+                "note": "Manage OpenAI and Anthropic models. Keys stay server-side.",
+            },
             "appearance": {"status": "coming_soon", "note": "Theme controls arrive in PR6"},
             "danger": {"status": "coming_soon", "note": "Reset actions arrive in PR6"},
+        },
+        "models": {
+            "count": len(models),
+            "default_chat": chat_default.name if chat_default else None,
+            "default_embedding": embed_default.name if embed_default else None,
         },
         "demo": {
             "connected": store.get_user_by_email("demo@example.com") is not None,

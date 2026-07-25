@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-from backend.api import auth, chat, documents, settings as settings_api
+from backend.api import auth, chat, documents, models as models_api, settings as settings_api
 from backend.api.deps import get_store
 from backend.config import get_settings
 from backend.seed import DEMO_EMAIL, DEMO_PASSWORD, seed_demo_user
@@ -48,7 +48,8 @@ app = FastAPI(
         {"name": "auth", "description": "Register, login, and session identity"},
         {"name": "documents", "description": "PDF upload, listing, and deletion"},
         {"name": "chat", "description": "RAG question answering over documents"},
-        {"name": "settings", "description": "App settings shell (models arrive in PR2)"},
+        {"name": "settings", "description": "App settings and storage status"},
+        {"name": "models", "description": "LLM model configs (OpenAI + Anthropic)"},
     ],
 )
 
@@ -64,6 +65,7 @@ app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(chat.router)
 app.include_router(settings_api.router)
+app.include_router(models_api.router)
 
 
 @app.get("/health", tags=["system"])
