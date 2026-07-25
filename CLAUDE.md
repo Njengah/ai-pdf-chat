@@ -4,9 +4,18 @@ Chat with uploaded PDFs using retrieval-augmented generation (RAG).
 
 ## Stack
 
-- **Backend:** FastAPI, pypdf, sentence-transformers, OpenAI-compatible LLM
+- **Backend:** FastAPI, pypdf, OpenAI-compatible / Anthropic LLM (PR2+)
 - **Frontend:** Vite + React + TypeScript
-- **Storage:** Local filesystem + in-memory / JSON vector index for demos
+- **Storage:** SQLite (`data/app.db`) + local PDF uploads
+
+## PR roadmap
+
+1. **PR1 (current):** SQLite + Settings shell  
+2. **PR2:** Models CRUD (OpenAI + Anthropic, server-side keys)  
+3. **PR3:** Chat switcher + history + export  
+4. **PR4:** Streaming + RAG steps  
+5. **PR5:** Multi-upload + PDF viewer  
+6. **PR6:** Theme + danger zone polish
 
 ## Layout
 
@@ -53,6 +62,7 @@ npm run dev
 | DELETE | `/api/documents/{id}` | Remove document |
 | POST | `/api/chat` | Ask a question over docs |
 | GET | `/api/chat/{session_id}` | Fetch session history |
+| GET | `/api/settings/status` | Settings shell / storage info |
 
 ## Agent rules
 

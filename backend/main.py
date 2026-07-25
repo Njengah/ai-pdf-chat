@@ -6,14 +6,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-from backend.api import auth, chat, documents
+from backend.api import auth, chat, documents, settings as settings_api
 from backend.api.deps import get_store
 from backend.config import get_settings
 from backend.seed import DEMO_EMAIL, DEMO_PASSWORD, seed_demo_user
 
 settings = get_settings()
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
-settings.vector_store_path.parent.mkdir(parents=True, exist_ok=True)
+settings.database_path.parent.mkdir(parents=True, exist_ok=True)
 
 API_DESCRIPTION = """
 AI PDF Chat API — RAG chat over uploaded PDFs.
@@ -48,6 +48,7 @@ app = FastAPI(
         {"name": "auth", "description": "Register, login, and session identity"},
         {"name": "documents", "description": "PDF upload, listing, and deletion"},
         {"name": "chat", "description": "RAG question answering over documents"},
+        {"name": "settings", "description": "App settings shell (models arrive in PR2)"},
     ],
 )
 
@@ -62,6 +63,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(chat.router)
+app.include_router(settings_api.router)
 
 
 @app.get("/health", tags=["system"])

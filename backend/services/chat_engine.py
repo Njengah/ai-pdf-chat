@@ -8,7 +8,7 @@ import httpx
 
 from backend.config import Settings, get_settings
 from backend.models.schemas import ChatMessage, ChatResponse, SourceChunk
-from backend.models.store import ChunkRecord, MemoryStore
+from backend.models.store import ChunkRecord, SQLiteStore
 from backend.services.embeddings import embed_texts, top_k_chunks
 
 
@@ -68,7 +68,7 @@ async def _call_llm(question: str, context: str, settings: Settings) -> str:
 
 
 async def answer_question(
-    store: MemoryStore,
+    store: SQLiteStore,
     owner_id: UUID,
     question: str,
     document_ids: Optional[list[UUID]] = None,
@@ -89,7 +89,7 @@ async def answer_question(
 
     ranked = top_k_chunks(
         query_vecs[0],
-        store.chunks,
+        store.list_chunks(allowed),
         k=settings.top_k,
         document_ids=allowed,
     )
@@ -117,11 +117,10 @@ async def answer_question(
         created_at=now,
     )
 
-    store.append_messages(
+    refreshed = store.append_messages(
         session.id,
         [user_msg.model_dump(mode="json"), assistant_msg.model_dump(mode="json")],
     )
-    refreshed = store.sessions[session.id]
     messages = [ChatMessage(**m) for m in refreshed.messages]
 
     return ChatResponse(

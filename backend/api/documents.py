@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from backend.api.deps import get_current_user, get_store
 from backend.config import Settings, get_settings
 from backend.models.schemas import DocumentMeta
-from backend.models.store import DocumentRecord, MemoryStore, UserRecord
+from backend.models.store import DocumentRecord, SQLiteStore, UserRecord
 from backend.services.chat_engine import make_chunk_records
 from backend.services.embeddings import chunk_pages, embed_texts
 from backend.services.pdf_parser import extract_text_from_pdf, page_count
@@ -32,7 +32,7 @@ def _meta(doc: DocumentRecord) -> DocumentMeta:
 @router.get("", response_model=list[DocumentMeta])
 def list_documents(
     user: Annotated[UserRecord, Depends(get_current_user)],
-    store: Annotated[MemoryStore, Depends(get_store)],
+    store: Annotated[SQLiteStore, Depends(get_store)],
 ) -> list[DocumentMeta]:
     return [_meta(d) for d in store.list_documents(user.id)]
 
@@ -40,7 +40,7 @@ def list_documents(
 @router.post("/upload", response_model=DocumentMeta, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     user: Annotated[UserRecord, Depends(get_current_user)],
-    store: Annotated[MemoryStore, Depends(get_store)],
+    store: Annotated[SQLiteStore, Depends(get_store)],
     settings: Annotated[Settings, Depends(get_settings)],
     file: UploadFile = File(...),
 ) -> DocumentMeta:
@@ -89,7 +89,7 @@ async def upload_document(
 def delete_document(
     document_id: UUID,
     user: Annotated[UserRecord, Depends(get_current_user)],
-    store: Annotated[MemoryStore, Depends(get_store)],
+    store: Annotated[SQLiteStore, Depends(get_store)],
 ) -> None:
     if not store.delete_document(document_id, user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
