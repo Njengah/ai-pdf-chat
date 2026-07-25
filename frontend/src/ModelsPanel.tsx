@@ -45,9 +45,9 @@ export default function ModelsPanel() {
     setEditingId(model.id);
     setForm({
       name: model.name,
-      provider: model.provider,
+      provider: model.provider === "anthropic" ? "anthropic" : "openai",
       model_id: model.model_id,
-      kind: model.kind,
+      kind: model.kind === "embedding" ? "embedding" : "chat",
       base_url: model.base_url || "",
       api_key: "",
       is_default: model.is_default,

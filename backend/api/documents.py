@@ -6,6 +6,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 
 from backend.api.deps import get_current_user, get_store
 from backend.config import Settings, get_settings
@@ -90,6 +91,26 @@ async def upload_document(
     except Exception as exc:
         Path(dest).unlink(missing_ok=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.get("/{document_id}/file")
+def get_document_file(
+    document_id: UUID,
+    user: Annotated[UserRecord, Depends(get_current_user)],
+    store: Annotated[SQLiteStore, Depends(get_store)],
+) -> FileResponse:
+    doc = store.get_document(document_id, user.id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    path = Path(doc.path)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF file missing on disk")
+    return FileResponse(
+        path=path,
+        media_type="application/pdf",
+        filename=doc.filename,
+        content_disposition_type="inline",
+    )
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
