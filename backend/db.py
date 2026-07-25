@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     owner_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT 'New chat',
     created_at TEXT NOT NULL,
     FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -86,4 +87,9 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+    if "title" not in cols:
+        conn.execute(
+            "ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT 'New chat'"
+        )
     conn.commit()

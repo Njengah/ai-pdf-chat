@@ -27,21 +27,41 @@ def _build_context(sources: list[SourceChunk]) -> str:
     return "\n\n".join(blocks) if blocks else "(no relevant context found)"
 
 
-async def _call_llm(question: str, context: str, store: SQLiteStore, owner_id: UUID, settings: Settings) -> str:
-    chat_record = store.get_default_model(owner_id, "chat")
+async def _call_llm(
+    question: str,
+    context: str,
+    store: SQLiteStore,
+    owner_id: UUID,
+    settings: Settings,
+    model_id: Optional[UUID] = None,
+) -> tuple[str, Optional[UUID]]:
+    chat_record = None
+    used_model_id: Optional[UUID] = None
+    if model_id:
+        chat_record = store.get_model(model_id, owner_id)
+        if chat_record is None or chat_record.kind != "chat":
+            raise ValueError("Selected chat model not found")
+        used_model_id = UUID(chat_record.id)
+    else:
+        chat_record = store.get_default_model(owner_id, "chat")
+        if chat_record:
+            used_model_id = UUID(chat_record.id)
+
     model = resolve_model(chat_record, "chat", settings)
 
     if model is None or not model.api_key:
         if "(no relevant context found)" in context:
             return (
                 "I could not find relevant passages in your uploaded PDFs. "
-                "Upload a document or ask about something present in the file."
+                "Upload a document or ask about something present in the file.",
+                used_model_id,
             )
         excerpt = context[:900]
         return (
             "(Local demo mode — add a chat model with API key in Settings → Models.)\n\n"
             f"Based on the retrieved context:\n{excerpt}\n\n"
-            f"Question: {question}"
+            f"Question: {question}",
+            used_model_id,
         )
 
     user_prompt = (
@@ -49,7 +69,8 @@ async def _call_llm(question: str, context: str, store: SQLiteStore, owner_id: U
         f"Question: {question}\n\n"
         "Answer using the context above."
     )
-    return await chat_completion(model, SYSTEM_PROMPT, user_prompt)
+    answer = await chat_completion(model, SYSTEM_PROMPT, user_prompt)
+    return answer, used_model_id
 
 
 async def answer_question(
@@ -58,6 +79,7 @@ async def answer_question(
     question: str,
     document_ids: Optional[list[UUID]] = None,
     session_id: Optional[UUID] = None,
+    model_id: Optional[UUID] = None,
     settings: Optional[Settings] = None,
 ) -> ChatResponse:
     settings = settings or get_settings()
@@ -93,7 +115,14 @@ async def answer_question(
         if score > 0
     ]
 
-    answer = await _call_llm(question, _build_context(sources), store, owner_id, settings)
+    answer, used_model_id = await _call_llm(
+        question,
+        _build_context(sources),
+        store,
+        owner_id,
+        settings,
+        model_id=model_id,
+    )
 
     now = datetime.utcnow()
     user_msg = ChatMessage(role="user", content=question, created_at=now)
@@ -115,7 +144,38 @@ async def answer_question(
         answer=answer,
         sources=sources,
         messages=messages,
+        title=refreshed.title,
+        model_id=used_model_id,
     )
+
+
+def session_to_markdown(session) -> str:
+    lines = [
+        f"# {session.title}",
+        "",
+        f"_Session `{session.id}` · created {session.created_at}_",
+        "",
+    ]
+    for msg in session.messages:
+        role = "You" if msg.get("role") == "user" else "Assistant"
+        lines.append(f"## {role}")
+        lines.append("")
+        lines.append(str(msg.get("content") or "").strip())
+        lines.append("")
+        sources = msg.get("sources") or []
+        if sources:
+            lines.append("### Sources")
+            lines.append("")
+            for src in sources:
+                lines.append(
+                    f"- **{src.get('filename')}** p.{src.get('page')} "
+                    f"(score {src.get('score', 0)})"
+                )
+                text = str(src.get("text") or "")[:240]
+                if text:
+                    lines.append(f"  > {text}")
+            lines.append("")
+    return "\n".join(lines).strip() + "\n"
 
 
 def make_chunk_records(

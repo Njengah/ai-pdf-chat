@@ -56,6 +56,7 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1)
     document_ids: Optional[list[UUID]] = None
     session_id: Optional[UUID] = None
+    model_id: Optional[UUID] = None
 
 
 class ChatResponse(BaseModel):
@@ -63,13 +64,30 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceChunk]
     messages: list[ChatMessage]
+    title: str = "New chat"
+    model_id: Optional[UUID] = None
 
 
 class ChatSession(BaseModel):
     id: UUID
     owner_id: UUID
+    title: str = "New chat"
     messages: list[ChatMessage] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatSessionSummary(BaseModel):
+    id: UUID
+    owner_id: UUID
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    message_count: int
+    preview: str = ""
+
+
+class ChatSessionRename(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
 
 
 class LLMModelCreate(BaseModel):
