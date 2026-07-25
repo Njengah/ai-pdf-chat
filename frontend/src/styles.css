@@ -445,6 +445,98 @@ button:disabled {
   backdrop-filter: blur(10px);
 }
 
+.chat-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.model-switch {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.model-switch select {
+  min-width: 160px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.export-btn {
+  width: auto;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+  overflow: auto;
+  max-height: 28vh;
+}
+
+.session-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.2rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: #f7fafc;
+}
+
+.session-list li.active {
+  border-color: #9ed4d1;
+  background: var(--accent-soft);
+}
+
+.session-main {
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.session-main strong,
+.session-main small {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-main small {
+  color: var(--muted);
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+}
+
+.session-actions,
+.doc-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding-right: 0.25rem;
+}
+
 .chat-top h1 {
   margin: 0;
   font-size: 1.05rem;

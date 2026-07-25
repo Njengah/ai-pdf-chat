@@ -28,6 +28,26 @@ export type ChatResponse = {
   answer: string;
   sources: SourceChunk[];
   messages: ChatMessage[];
+  title?: string;
+  model_id?: string | null;
+};
+
+export type ChatSessionSummary = {
+  id: string;
+  owner_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  preview: string;
+};
+
+export type ChatSession = {
+  id: string;
+  owner_id: string;
+  title: string;
+  messages: ChatMessage[];
+  created_at: string;
 };
 
 function authHeaders(): HeadersInit {
@@ -104,7 +124,8 @@ export async function deleteDocument(id: string): Promise<void> {
 export async function askChat(
   question: string,
   sessionId?: string | null,
-  documentIds?: string[]
+  documentIds?: string[],
+  modelId?: string | null
 ): Promise<ChatResponse> {
   const res = await fetch("/api/chat", {
     method: "POST",
@@ -113,10 +134,47 @@ export async function askChat(
       question,
       session_id: sessionId || null,
       document_ids: documentIds?.length ? documentIds : null,
+      model_id: modelId || null,
     }),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
+}
+
+export async function listSessions(): Promise<ChatSessionSummary[]> {
+  const res = await fetch("/api/chat/sessions", { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function getSession(id: string): Promise<ChatSession> {
+  const res = await fetch(`/api/chat/${id}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function renameSession(id: string, title: string): Promise<ChatSessionSummary> {
+  const res = await fetch(`/api/chat/sessions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  const res = await fetch(`/api/chat/sessions/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
+export async function exportSessionMarkdown(id: string): Promise<string> {
+  const res = await fetch(`/api/chat/sessions/${id}/export`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.text();
 }
 
 export type SettingsStatus = {

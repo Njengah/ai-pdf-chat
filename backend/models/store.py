@@ -48,8 +48,20 @@ class ChunkRecord:
 class SessionRecord:
     id: str
     owner_id: str
+    title: str = "New chat"
     messages: list[dict[str, Any]] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+
+
+@dataclass
+class SessionSummary:
+    id: str
+    owner_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int
+    preview: str
 
 
 @dataclass
@@ -201,7 +213,10 @@ class SQLiteStore:
         return [self._chunk_from_row(r) for r in rows]
 
     def get_or_create_session(
-        self, owner_id: UUID | str, session_id: Optional[UUID] = None
+        self,
+        owner_id: UUID | str,
+        session_id: Optional[UUID] = None,
+        title: Optional[str] = None,
     ) -> SessionRecord:
         with self.lock:
             if session_id:
@@ -210,10 +225,14 @@ class SQLiteStore:
                     if session.owner_id != str(owner_id):
                         raise PermissionError("Session not found")
                     return session
-            session = SessionRecord(id=str(uuid4()), owner_id=str(owner_id))
+            session = SessionRecord(
+                id=str(uuid4()),
+                owner_id=str(owner_id),
+                title=(title or "New chat").strip() or "New chat",
+            )
             self.conn.execute(
-                "INSERT INTO sessions (id, owner_id, created_at) VALUES (?, ?, ?)",
-                (session.id, session.owner_id, session.created_at),
+                "INSERT INTO sessions (id, owner_id, title, created_at) VALUES (?, ?, ?, ?)",
+                (session.id, session.owner_id, session.title, session.created_at),
             )
             self.conn.commit()
             return session
@@ -226,15 +245,92 @@ class SQLiteStore:
         if not row:
             return None
         messages = self._load_messages(str(session_id))
+        title = row["title"] if "title" in row.keys() else "New chat"
         return SessionRecord(
             id=row["id"],
             owner_id=row["owner_id"],
+            title=title or "New chat",
             created_at=row["created_at"],
             messages=messages,
         )
 
+    def list_sessions(self, owner_id: UUID | str) -> list[SessionSummary]:
+        rows = self.conn.execute(
+            """
+            SELECT
+                s.id,
+                s.owner_id,
+                COALESCE(s.title, 'New chat') AS title,
+                s.created_at,
+                COUNT(m.id) AS message_count,
+                COALESCE(
+                    (
+                        SELECT m2.content
+                        FROM messages m2
+                        WHERE m2.session_id = s.id
+                        ORDER BY m2.position DESC
+                        LIMIT 1
+                    ),
+                    ''
+                ) AS preview,
+                COALESCE(
+                    (
+                        SELECT m3.created_at
+                        FROM messages m3
+                        WHERE m3.session_id = s.id
+                        ORDER BY m3.position DESC
+                        LIMIT 1
+                    ),
+                    s.created_at
+                ) AS updated_at
+            FROM sessions s
+            LEFT JOIN messages m ON m.session_id = s.id
+            WHERE s.owner_id = ?
+            GROUP BY s.id
+            ORDER BY updated_at DESC
+            """,
+            (str(owner_id),),
+        ).fetchall()
+        return [
+            SessionSummary(
+                id=row["id"],
+                owner_id=row["owner_id"],
+                title=row["title"] or "New chat",
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                message_count=int(row["message_count"] or 0),
+                preview=(row["preview"] or "")[:120],
+            )
+            for row in rows
+        ]
+
+    def rename_session(self, session_id: UUID | str, owner_id: UUID | str, title: str) -> Optional[SessionRecord]:
+        with self.lock:
+            session = self.get_session(session_id)
+            if not session or session.owner_id != str(owner_id):
+                return None
+            clean = title.strip() or "New chat"
+            self.conn.execute(
+                "UPDATE sessions SET title = ? WHERE id = ?",
+                (clean[:120], session.id),
+            )
+            self.conn.commit()
+            return self.get_session(session_id)
+
+    def delete_session(self, session_id: UUID | str, owner_id: UUID | str) -> bool:
+        with self.lock:
+            session = self.get_session(session_id)
+            if not session or session.owner_id != str(owner_id):
+                return False
+            self.conn.execute("DELETE FROM messages WHERE session_id = ?", (session.id,))
+            self.conn.execute("DELETE FROM sessions WHERE id = ?", (session.id,))
+            self.conn.commit()
+            return True
+
     def append_messages(self, session_id: str, messages: list[dict[str, Any]]) -> SessionRecord:
         with self.lock:
+            session = self.get_session(session_id)
+            assert session is not None
             start = self.conn.execute(
                 "SELECT COALESCE(MAX(position), -1) AS m FROM messages WHERE session_id = ?",
                 (session_id,),
@@ -258,10 +354,19 @@ class SQLiteStore:
                         start + offset,
                     ),
                 )
+            # Auto-title from first user message when still default
+            if session.title in ("", "New chat") and start < 0:
+                first_user = next((m for m in messages if m.get("role") == "user"), None)
+                if first_user and first_user.get("content"):
+                    auto = str(first_user["content"]).strip().replace("\n", " ")[:80]
+                    self.conn.execute(
+                        "UPDATE sessions SET title = ? WHERE id = ?",
+                        (auto or "New chat", session_id),
+                    )
             self.conn.commit()
-            session = self.get_session(session_id)
-            assert session is not None
-            return session
+            refreshed = self.get_session(session_id)
+            assert refreshed is not None
+            return refreshed
 
     def _load_messages(self, session_id: str) -> list[dict[str, Any]]:
         rows = self.conn.execute(

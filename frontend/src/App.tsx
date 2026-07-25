@@ -1,13 +1,21 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   ChatMessage,
+  ChatSessionSummary,
   DocumentMeta,
+  LLMModel,
   askChat,
   deleteDocument,
+  deleteSession,
+  exportSessionMarkdown,
+  getSession,
   getToken,
   listDocuments,
+  listModels,
+  listSessions,
   login,
   register,
+  renameSession,
   setToken,
   uploadDocument,
 } from "./api";
@@ -31,19 +39,38 @@ export default function App() {
   const [selected, setSelected] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionTitle, setSessionTitle] = useState("New chat");
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  const [chatModels, setChatModels] = useState<LLMModel[]>([]);
+  const [modelId, setModelId] = useState<string>("");
   const [question, setQuestion] = useState("");
   const [page, setPage] = useState<"chat" | "settings">("chat");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function refreshDocs() {
-    const items = await listDocuments();
-    setDocs(items);
+    setDocs(await listDocuments());
+  }
+
+  async function refreshSessions() {
+    setSessions(await listSessions());
+  }
+
+  async function refreshModels() {
+    const models = await listModels("chat");
+    setChatModels(models);
+    setModelId((prev) => {
+      if (prev && models.some((m) => m.id === prev)) return prev;
+      const def = models.find((m) => m.is_default);
+      return def?.id || models[0]?.id || "";
+    });
   }
 
   useEffect(() => {
     if (!authed) return;
-    refreshDocs().catch((err) => setError(err.message));
+    Promise.all([refreshDocs(), refreshSessions(), refreshModels()]).catch((err) =>
+      setError(err.message)
+    );
   }, [authed]);
 
   useEffect(() => {
@@ -101,9 +128,12 @@ export default function App() {
     setError(null);
     setQuestion("");
     try {
-      const res = await askChat(q, sessionId, selected);
+      const res = await askChat(q, sessionId, selected, modelId || null);
       setSessionId(res.session_id);
       setMessages(res.messages);
+      setSessionTitle(res.title || "New chat");
+      if (res.model_id) setModelId(res.model_id);
+      await refreshSessions();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chat failed");
     } finally {
@@ -122,11 +152,75 @@ export default function App() {
     );
   }
 
+  function chatWithDoc(id: string) {
+    setSelected([id]);
+    setMessages([]);
+    setSessionId(null);
+    setSessionTitle("New chat");
+    setError(null);
+    setQuestion("");
+  }
+
   function newChat() {
     setMessages([]);
     setSessionId(null);
+    setSessionTitle("New chat");
     setError(null);
     setQuestion("");
+  }
+
+  async function openSession(id: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const session = await getSession(id);
+      setSessionId(session.id);
+      setSessionTitle(session.title);
+      setMessages(session.messages);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to open chat");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRenameSession(id: string, current: string) {
+    const next = window.prompt("Rename chat", current);
+    if (!next || !next.trim()) return;
+    try {
+      await renameSession(id, next.trim());
+      await refreshSessions();
+      if (sessionId === id) setSessionTitle(next.trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Rename failed");
+    }
+  }
+
+  async function onDeleteSession(id: string) {
+    if (!confirm("Delete this chat?")) return;
+    try {
+      await deleteSession(id);
+      if (sessionId === id) newChat();
+      await refreshSessions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
+  async function onExport() {
+    if (!sessionId) return;
+    try {
+      const md = await exportSessionMarkdown(sessionId);
+      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${sessionTitle.replace(/[^\w\-]+/g, "_").slice(0, 40) || "chat"}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Export failed");
+    }
   }
 
   if (!authed) {
@@ -195,7 +289,14 @@ export default function App() {
   }
 
   if (page === "settings") {
-    return <Settings onBack={() => setPage("chat")} />;
+    return (
+      <Settings
+        onBack={() => {
+          setPage("chat");
+          refreshModels().catch(() => undefined);
+        }}
+      />
+    );
   }
 
   return (
@@ -215,6 +316,44 @@ export default function App() {
         <button type="button" className="btn-text settings-link" onClick={() => setPage("settings")}>
           Settings
         </button>
+
+        <div className="sidebar-section">
+          <div className="section-head">
+            <h3>Chats</h3>
+          </div>
+          <ul className="session-list">
+            {sessions.map((s) => (
+              <li key={s.id} className={sessionId === s.id ? "active" : ""}>
+                <button type="button" className="session-main" onClick={() => openSession(s.id)}>
+                  <strong>{s.title}</strong>
+                  <small>
+                    {s.message_count} msgs
+                    {s.preview ? ` · ${s.preview.slice(0, 40)}` : ""}
+                  </small>
+                </button>
+                <div className="session-actions">
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    title="Rename"
+                    onClick={() => onRenameSession(s.id, s.title)}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    title="Delete"
+                    onClick={() => onDeleteSession(s.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              </li>
+            ))}
+            {sessions.length === 0 && <li className="empty-docs">No chats yet.</li>}
+          </ul>
+        </div>
 
         <div className="sidebar-section">
           <div className="section-head">
@@ -256,21 +395,29 @@ export default function App() {
                       </small>
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    className="btn-icon"
-                    aria-label={`Remove ${doc.filename}`}
-                    onClick={() => onDelete(doc.id)}
-                  >
-                    ×
-                  </button>
+                  <div className="doc-actions">
+                    <button
+                      type="button"
+                      className="btn-text sm"
+                      onClick={() => chatWithDoc(doc.id)}
+                      title="Chat with this PDF only"
+                    >
+                      Chat
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      aria-label={`Remove ${doc.filename}`}
+                      onClick={() => onDelete(doc.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
                 </li>
               );
             })}
             {docs.length === 0 && (
-              <li className="empty-docs">
-                Drop a PDF via Upload to start chatting.
-              </li>
+              <li className="empty-docs">Drop a PDF via Upload to start chatting.</li>
             )}
           </ul>
         </div>
@@ -298,13 +445,39 @@ export default function App() {
       <main className="chat">
         <header className="chat-top">
           <div>
-            <h1>Workspace chat</h1>
+            <h1>{sessionTitle}</h1>
             <p>
               Answers cite pages from your library
               {sessionId ? " · session active" : ""}
             </p>
           </div>
-          <div className="status-pill">{busy ? "Thinking" : "Ready"}</div>
+          <div className="chat-top-actions">
+            <label className="model-switch">
+              <span>Model</span>
+              <select
+                value={modelId}
+                onChange={(e) => setModelId(e.target.value)}
+                disabled={chatModels.length === 0}
+              >
+                {chatModels.length === 0 && <option value="">Local demo</option>}
+                {chatModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                    {m.is_default ? " (default)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="btn-secondary export-btn"
+              onClick={onExport}
+              disabled={!sessionId || messages.length === 0}
+            >
+              Export MD
+            </button>
+            <div className="status-pill">{busy ? "Thinking" : "Ready"}</div>
+          </div>
         </header>
 
         <div className="messages">
@@ -312,7 +485,7 @@ export default function App() {
             <div className="empty-state">
               <span className="logo-mark">AI</span>
               <h2>Ask anything about your PDFs</h2>
-              <p>Pick a prompt or type your own question below.</p>
+              <p>Pick a prompt, choose a model, or start from a library PDF.</p>
               <div className="prompt-row">
                 {PROMPTS.map((p) => (
                   <button
