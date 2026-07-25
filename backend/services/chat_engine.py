@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+from uuid import UUID, uuid4
+
+import httpx
+
+from backend.config import Settings, get_settings
+from backend.models.schemas import ChatMessage, ChatResponse, SourceChunk
+from backend.models.store import ChunkRecord, MemoryStore
+from backend.services.embeddings import embed_texts, top_k_chunks
+
+
+SYSTEM_PROMPT = (
+    "You are a helpful assistant that answers questions using only the provided "
+    "PDF context. If the context is insufficient, say you do not know based on "
+    "the uploaded documents. Cite page numbers when useful."
+)
+
+
+def _build_context(sources: list[SourceChunk]) -> str:
+    blocks = []
+    for idx, src in enumerate(sources, start=1):
+        blocks.append(
+            f"[{idx}] file={src.filename} page={src.page}\n{src.text}"
+        )
+    return "\n\n".join(blocks) if blocks else "(no relevant context found)"
+
+
+async def _call_llm(question: str, context: str, settings: Settings) -> str:
+    if not settings.openai_api_key:
+        if "(no relevant context found)" in context:
+            return (
+                "I could not find relevant passages in your uploaded PDFs. "
+                "Upload a document or ask about something present in the file."
+            )
+        excerpt = context[:900]
+        return (
+            f"(Local demo mode — set OPENAI_API_KEY for live LLM answers.)\n\n"
+            f"Based on the retrieved context:\n{excerpt}\n\n"
+            f"Question: {question}"
+        )
+
+    headers = {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": settings.openai_model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"Context from PDFs:\n{context}\n\n"
+                    f"Question: {question}\n\n"
+                    "Answer using the context above."
+                ),
+            },
+        ],
+        "temperature": 0.2,
+    }
+    async with httpx.AsyncClient(base_url=settings.openai_base_url, timeout=90.0) as client:
+        response = await client.post("/chat/completions", headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+
+
+async def answer_question(
+    store: MemoryStore,
+    owner_id: UUID,
+    question: str,
+    document_ids: Optional[list[UUID]] = None,
+    session_id: Optional[UUID] = None,
+    settings: Optional[Settings] = None,
+) -> ChatResponse:
+    settings = settings or get_settings()
+    session = store.get_or_create_session(owner_id, session_id)
+
+    query_vecs = await embed_texts([question], settings=settings)
+    allowed = {str(d) for d in document_ids} if document_ids else None
+    # Restrict to owner's documents
+    owner_docs = {d.id for d in store.list_documents(owner_id)}
+    if allowed is None:
+        allowed = owner_docs
+    else:
+        allowed = allowed & owner_docs
+
+    ranked = top_k_chunks(
+        query_vecs[0],
+        store.chunks,
+        k=settings.top_k,
+        document_ids=allowed,
+    )
+
+    sources = [
+        SourceChunk(
+            document_id=UUID(chunk.document_id),
+            filename=chunk.filename,
+            page=chunk.page,
+            text=chunk.text,
+            score=round(score, 4),
+        )
+        for chunk, score in ranked
+        if score > 0
+    ]
+
+    answer = await _call_llm(question, _build_context(sources), settings)
+
+    now = datetime.utcnow()
+    user_msg = ChatMessage(role="user", content=question, created_at=now)
+    assistant_msg = ChatMessage(
+        role="assistant",
+        content=answer,
+        sources=sources,
+        created_at=now,
+    )
+
+    store.append_messages(
+        session.id,
+        [user_msg.model_dump(mode="json"), assistant_msg.model_dump(mode="json")],
+    )
+    refreshed = store.sessions[session.id]
+    messages = [ChatMessage(**m) for m in refreshed.messages]
+
+    return ChatResponse(
+        session_id=UUID(session.id),
+        answer=answer,
+        sources=sources,
+        messages=messages,
+    )
+
+
+def make_chunk_records(
+    document_id: str,
+    filename: str,
+    chunk_dicts: list[dict],
+    embeddings: list[list[float]],
+) -> list[ChunkRecord]:
+    records: list[ChunkRecord] = []
+    for chunk, emb in zip(chunk_dicts, embeddings):
+        records.append(
+            ChunkRecord(
+                id=str(uuid4()),
+                document_id=document_id,
+                filename=filename,
+                page=chunk["page"],
+                text=chunk["text"],
+                embedding=emb,
+            )
+        )
+    return records
