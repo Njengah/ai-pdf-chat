@@ -102,15 +102,52 @@ export async function listDocuments(): Promise<DocumentMeta[]> {
 }
 
 export async function uploadDocument(file: File): Promise<DocumentMeta> {
-  const form = new FormData();
-  form.append("file", file);
-  const res = await fetch("/api/documents/upload", {
-    method: "POST",
+  return uploadDocumentWithProgress(file);
+}
+
+export function uploadDocumentWithProgress(
+  file: File,
+  onProgress?: (percent: number) => void
+): Promise<DocumentMeta> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/documents/upload");
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onProgress) return;
+      onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as DocumentMeta);
+        } catch {
+          reject(new Error("Invalid upload response"));
+        }
+        return;
+      }
+      try {
+        const data = JSON.parse(xhr.responseText);
+        reject(new Error(typeof data.detail === "string" ? data.detail : xhr.statusText));
+      } catch {
+        reject(new Error(xhr.statusText || "Upload failed"));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Upload failed"));
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
+}
+
+export async function fetchDocumentPdf(documentId: string): Promise<Blob> {
+  const res = await fetch(`/api/documents/${documentId}/file`, {
     headers: authHeaders(),
-    body: form,
   });
   if (!res.ok) throw new Error(await parseError(res));
-  return res.json();
+  return res.blob();
 }
 
 export async function deleteDocument(id: string): Promise<void> {

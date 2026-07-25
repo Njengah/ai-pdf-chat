@@ -18,9 +18,18 @@ import {
   register,
   renameSession,
   setToken,
-  uploadDocument,
+  uploadDocumentWithProgress,
 } from "./api";
+import PdfViewer from "./PdfViewer";
 import Settings from "./Settings";
+
+type UploadItem = {
+  id: string;
+  name: string;
+  percent: number;
+  status: "uploading" | "done" | "error";
+  error?: string;
+};
 
 const PROMPTS = [
   "Summarize this document in 5 bullets",
@@ -48,6 +57,13 @@ export default function App() {
   const [page, setPage] = useState<"chat" | "settings">("chat");
   const [stage, setStage] = useState<string | null>(null);
   const [streamSources, setStreamSources] = useState<SourceChunk[]>([]);
+  const [uploads, setUploads] = useState<UploadItem[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const [viewer, setViewer] = useState<{
+    documentId: string;
+    filename: string;
+    page: number;
+  } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -95,19 +111,70 @@ export default function App() {
     }
   }
 
-  async function onUpload(file: File | undefined) {
-    if (!file) return;
+  async function uploadOne(file: File) {
+    const id = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setUploads((prev) => [
+      ...prev,
+      { id, name: file.name, percent: 0, status: "uploading" },
+    ]);
+    try {
+      await uploadDocumentWithProgress(file, (percent) => {
+        setUploads((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, percent } : item))
+        );
+      });
+      setUploads((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, percent: 100, status: "done" } : item
+        )
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Upload failed";
+      setUploads((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, status: "error", error: message } : item
+        )
+      );
+      throw err;
+    }
+  }
+
+  async function onUploadFiles(fileList: FileList | File[] | null | undefined) {
+    if (!fileList) return;
+    const files = Array.from(fileList).filter((f) =>
+      f.name.toLowerCase().endsWith(".pdf")
+    );
+    if (!files.length) {
+      setError("Only PDF files are supported");
+      return;
+    }
     setBusy(true);
     setError(null);
-    try {
-      await uploadDocument(file);
-      await refreshDocs();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
+    const failures: string[] = [];
+    for (const file of files) {
+      try {
+        await uploadOne(file);
+      } catch (err) {
+        failures.push(err instanceof Error ? err.message : file.name);
+      }
     }
+    await refreshDocs();
+    setBusy(false);
+    if (fileRef.current) fileRef.current.value = "";
+    if (failures.length) {
+      setError(`${failures.length} upload(s) failed`);
+    }
+    window.setTimeout(() => {
+      setUploads((prev) => prev.filter((u) => u.status === "uploading"));
+    }, 2500);
+  }
+
+  function openSource(src: SourceChunk) {
+    setViewer({
+      documentId: src.document_id,
+      filename: src.filename,
+      page: src.page || 1,
+    });
   }
 
   async function onDelete(id: string) {
@@ -352,7 +419,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${viewer ? "with-viewer" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-brand">
           <span className="logo-mark sm">AI</span>
@@ -422,16 +489,61 @@ export default function App() {
               ref={fileRef}
               type="file"
               accept="application/pdf"
+              multiple
               hidden
-              onChange={(e) => onUpload(e.target.files?.[0])}
+              onChange={(e) => onUploadFiles(e.target.files)}
             />
           </div>
+
+          <div
+            className={`dropzone ${dragOver ? "active" : ""}`}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              void onUploadFiles(e.dataTransfer.files);
+            }}
+          >
+            Drop PDFs here or use Upload
+          </div>
+
+          {uploads.length > 0 && (
+            <ul className="upload-list">
+              {uploads.map((item) => (
+                <li key={item.id} className={item.status}>
+                  <div className="upload-row">
+                    <strong>{item.name}</strong>
+                    <small>
+                      {item.status === "uploading" && `${item.percent}%`}
+                      {item.status === "done" && "Done"}
+                      {item.status === "error" && (item.error || "Failed")}
+                    </small>
+                  </div>
+                  <div className="upload-bar">
+                    <span style={{ width: `${item.percent}%` }} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
 
           <ul className="doc-list">
             {docs.map((doc) => {
               const active = selected.includes(doc.id);
+              const viewing = viewer?.documentId === doc.id;
               return (
-                <li key={doc.id} className={active ? "active" : ""}>
+                <li key={doc.id} className={active || viewing ? "active" : ""}>
                   <button
                     type="button"
                     className="doc-main"
@@ -448,6 +560,20 @@ export default function App() {
                     </span>
                   </button>
                   <div className="doc-actions">
+                    <button
+                      type="button"
+                      className="btn-text sm"
+                      onClick={() =>
+                        setViewer({
+                          documentId: doc.id,
+                          filename: doc.filename,
+                          page: 1,
+                        })
+                      }
+                      title="Open PDF viewer"
+                    >
+                      View
+                    </button>
                     <button
                       type="button"
                       className="btn-text sm"
@@ -469,7 +595,7 @@ export default function App() {
               );
             })}
             {docs.length === 0 && (
-              <li className="empty-docs">Drop a PDF via Upload to start chatting.</li>
+              <li className="empty-docs">Drop PDFs here to start chatting.</li>
             )}
           </ul>
         </div>
@@ -582,16 +708,23 @@ export default function App() {
               <div className="msg-body">
                 <p>{msg.content}</p>
                 {msg.sources && msg.sources.length > 0 && (
-                  <details className="sources">
+                  <details className="sources" open={idx === messages.length - 1}>
                     <summary>{msg.sources.length} sources</summary>
                     <ul>
                       {msg.sources.map((src, i) => (
                         <li key={`${src.document_id}-${i}`}>
-                          <div className="source-top">
-                            <strong>{src.filename}</strong>
-                            <span>p.{src.page}</span>
-                          </div>
-                          <p>{src.text.slice(0, 200)}…</p>
+                          <button
+                            type="button"
+                            className="source-jump"
+                            onClick={() => openSource(src)}
+                            title="Open cited page"
+                          >
+                            <div className="source-top">
+                              <strong>{src.filename}</strong>
+                              <span>p.{src.page}</span>
+                            </div>
+                            <p>{src.text.slice(0, 200)}…</p>
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -629,6 +762,16 @@ export default function App() {
           </button>
         </form>
       </main>
+
+      {viewer && (
+        <PdfViewer
+          documentId={viewer.documentId}
+          filename={viewer.filename}
+          page={viewer.page}
+          onClose={() => setViewer(null)}
+          onPageChange={(next) => setViewer((prev) => (prev ? { ...prev, page: next } : prev))}
+        />
+      )}
     </div>
   );
 }
