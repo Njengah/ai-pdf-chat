@@ -13,6 +13,7 @@ from backend.models.schemas import DocumentMeta
 from backend.models.store import DocumentRecord, SQLiteStore, UserRecord
 from backend.services.chat_engine import make_chunk_records
 from backend.services.embeddings import chunk_pages, embed_texts
+from backend.services.llm_providers import resolve_model
 from backend.services.pdf_parser import extract_text_from_pdf, page_count
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -65,7 +66,13 @@ async def upload_document(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No extractable text found in PDF",
             )
-        embeddings = await embed_texts([c["text"] for c in chunks], settings=settings)
+        embed_record = store.get_default_model(user.id, "embedding")
+        embed_model = resolve_model(embed_record, "embedding", settings)
+        embeddings = await embed_texts(
+            [c["text"] for c in chunks],
+            settings=settings,
+            model=embed_model,
+        )
         records = make_chunk_records(str(doc_id), file.filename, chunks, embeddings)
         doc = DocumentRecord(
             id=str(doc_id),

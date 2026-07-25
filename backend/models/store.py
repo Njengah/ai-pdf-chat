@@ -52,6 +52,21 @@ class SessionRecord:
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
 
+@dataclass
+class LLMModelRecord:
+    id: str
+    name: str
+    provider: str
+    model_id: str
+    kind: str
+    base_url: Optional[str]
+    api_key_encrypted: str
+    is_default: bool
+    owner_id: str
+    created_at: str
+    updated_at: str
+
+
 class SQLiteStore:
     """SQLite-backed store for users, documents, chunks, and chat sessions."""
 
@@ -291,6 +306,132 @@ class SQLiteStore:
             owner_id=row["owner_id"],
         )
 
+    def list_models(self, owner_id: UUID | str, kind: Optional[str] = None) -> list[LLMModelRecord]:
+        if kind:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM llm_models
+                WHERE owner_id = ? AND kind = ?
+                ORDER BY is_default DESC, name ASC
+                """,
+                (str(owner_id), kind),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM llm_models
+                WHERE owner_id = ?
+                ORDER BY kind ASC, is_default DESC, name ASC
+                """,
+                (str(owner_id),),
+            ).fetchall()
+        return [self._model_from_row(r) for r in rows]
+
+    def get_model(self, model_id: UUID | str, owner_id: UUID | str) -> Optional[LLMModelRecord]:
+        row = self.conn.execute(
+            "SELECT * FROM llm_models WHERE id = ? AND owner_id = ?",
+            (str(model_id), str(owner_id)),
+        ).fetchone()
+        return self._model_from_row(row) if row else None
+
+    def get_default_model(self, owner_id: UUID | str, kind: str) -> Optional[LLMModelRecord]:
+        row = self.conn.execute(
+            """
+            SELECT * FROM llm_models
+            WHERE owner_id = ? AND kind = ? AND is_default = 1
+            LIMIT 1
+            """,
+            (str(owner_id), kind),
+        ).fetchone()
+        return self._model_from_row(row) if row else None
+
+    def create_model(self, model: LLMModelRecord) -> LLMModelRecord:
+        with self.lock:
+            if model.is_default:
+                self.conn.execute(
+                    "UPDATE llm_models SET is_default = 0 WHERE owner_id = ? AND kind = ?",
+                    (model.owner_id, model.kind),
+                )
+            self.conn.execute(
+                """
+                INSERT INTO llm_models
+                (id, name, provider, model_id, kind, base_url, api_key_encrypted,
+                 is_default, owner_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    model.id,
+                    model.name,
+                    model.provider,
+                    model.model_id,
+                    model.kind,
+                    model.base_url,
+                    model.api_key_encrypted,
+                    1 if model.is_default else 0,
+                    model.owner_id,
+                    model.created_at,
+                    model.updated_at,
+                ),
+            )
+            self.conn.commit()
+            return model
+
+    def update_model(self, model: LLMModelRecord) -> LLMModelRecord:
+        with self.lock:
+            if model.is_default:
+                self.conn.execute(
+                    "UPDATE llm_models SET is_default = 0 WHERE owner_id = ? AND kind = ?",
+                    (model.owner_id, model.kind),
+                )
+            self.conn.execute(
+                """
+                UPDATE llm_models
+                SET name = ?, provider = ?, model_id = ?, kind = ?, base_url = ?,
+                    api_key_encrypted = ?, is_default = ?, updated_at = ?
+                WHERE id = ? AND owner_id = ?
+                """,
+                (
+                    model.name,
+                    model.provider,
+                    model.model_id,
+                    model.kind,
+                    model.base_url,
+                    model.api_key_encrypted,
+                    1 if model.is_default else 0,
+                    model.updated_at,
+                    model.id,
+                    model.owner_id,
+                ),
+            )
+            self.conn.commit()
+            return model
+
+    def delete_model(self, model_id: UUID | str, owner_id: UUID | str) -> bool:
+        with self.lock:
+            cur = self.conn.execute(
+                "DELETE FROM llm_models WHERE id = ? AND owner_id = ?",
+                (str(model_id), str(owner_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def set_default_model(self, model_id: UUID | str, owner_id: UUID | str) -> Optional[LLMModelRecord]:
+        with self.lock:
+            model = self.get_model(model_id, owner_id)
+            if not model:
+                return None
+            now = datetime.utcnow().isoformat()
+            self.conn.execute(
+                "UPDATE llm_models SET is_default = 0 WHERE owner_id = ? AND kind = ?",
+                (str(owner_id), model.kind),
+            )
+            self.conn.execute(
+                "UPDATE llm_models SET is_default = 1, updated_at = ? WHERE id = ?",
+                (now, model.id),
+            )
+            self.conn.commit()
+            return self.get_model(model_id, owner_id)
+
     @staticmethod
     def _chunk_from_row(row: Any) -> ChunkRecord:
         return ChunkRecord(
@@ -300,6 +441,22 @@ class SQLiteStore:
             page=row["page"],
             text=row["text"],
             embedding=json.loads(row["embedding"]),
+        )
+
+    @staticmethod
+    def _model_from_row(row: Any) -> LLMModelRecord:
+        return LLMModelRecord(
+            id=row["id"],
+            name=row["name"],
+            provider=row["provider"],
+            model_id=row["model_id"],
+            kind=row["kind"],
+            base_url=row["base_url"],
+            api_key_encrypted=row["api_key_encrypted"] or "",
+            is_default=bool(row["is_default"]),
+            owner_id=row["owner_id"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )
 
 
