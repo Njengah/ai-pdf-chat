@@ -12,8 +12,8 @@ Chat with uploaded PDFs using retrieval-augmented generation (RAG).
 
 1. **PR1:** SQLite + Settings shell  
 2. **PR2:** Models CRUD (OpenAI + Anthropic, server-side keys)  
-3. **PR3 (current):** Chat switcher + history + export  
-4. **PR4:** Streaming + RAG steps  
+3. **PR3:** Chat switcher + history + export  
+4. **PR4 (current):** Streaming + RAG steps  
 5. **PR5:** Multi-upload + PDF viewer  
 6. **PR6:** Theme + danger zone polish
 
@@ -61,6 +61,7 @@ npm run dev
 | GET | `/api/documents` | List documents |
 | DELETE | `/api/documents/{id}` | Remove document |
 | POST | `/api/chat` | Ask a question over docs (optional `model_id`) |
+| POST | `/api/chat/stream` | SSE stream: stages + tokens + sources |
 | GET | `/api/chat/sessions` | List chat history |
 | PATCH/DELETE | `/api/chat/sessions/{id}` | Rename / delete chat |
 | GET | `/api/chat/sessions/{id}/export` | Export chat as Markdown |

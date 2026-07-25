@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Optional
 
@@ -65,10 +67,25 @@ async def chat_completion(
     system_prompt: str,
     user_prompt: str,
 ) -> str:
+    chunks: list[str] = []
+    async for piece in stream_chat_completion(model, system_prompt, user_prompt):
+        chunks.append(piece)
+    return "".join(chunks).strip()
+
+
+async def stream_chat_completion(
+    model: ResolvedModel,
+    system_prompt: str,
+    user_prompt: str,
+) -> AsyncIterator[str]:
     if model.provider == "openai":
-        return await _openai_chat(model, system_prompt, user_prompt)
+        async for piece in _openai_chat_stream(model, system_prompt, user_prompt):
+            yield piece
+        return
     if model.provider == "anthropic":
-        return await _anthropic_chat(model, system_prompt, user_prompt)
+        async for piece in _anthropic_chat_stream(model, system_prompt, user_prompt):
+            yield piece
+        return
     raise ValueError(f"Unsupported chat provider: {model.provider}")
 
 
@@ -88,7 +105,11 @@ async def create_embeddings(model: ResolvedModel, texts: list[str]) -> list[list
         return [item["embedding"] for item in data_sorted]
 
 
-async def _openai_chat(model: ResolvedModel, system_prompt: str, user_prompt: str) -> str:
+async def _openai_chat_stream(
+    model: ResolvedModel,
+    system_prompt: str,
+    user_prompt: str,
+) -> AsyncIterator[str]:
     headers = {
         "Authorization": f"Bearer {model.api_key}",
         "Content-Type": "application/json",
@@ -100,14 +121,31 @@ async def _openai_chat(model: ResolvedModel, system_prompt: str, user_prompt: st
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.2,
+        "stream": True,
     }
     async with httpx.AsyncClient(base_url=model.base_url, timeout=90.0) as client:
-        response = await client.post("/chat/completions", headers=headers, json=payload)
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
+        async with client.stream("POST", "/chat/completions", headers=headers, json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
+                if delta:
+                    yield delta
 
 
-async def _anthropic_chat(model: ResolvedModel, system_prompt: str, user_prompt: str) -> str:
+async def _anthropic_chat_stream(
+    model: ResolvedModel,
+    system_prompt: str,
+    user_prompt: str,
+) -> AsyncIterator[str]:
     headers = {
         "x-api-key": model.api_key,
         "anthropic-version": "2023-06-01",
@@ -118,10 +156,20 @@ async def _anthropic_chat(model: ResolvedModel, system_prompt: str, user_prompt:
         "max_tokens": 1024,
         "system": system_prompt,
         "messages": [{"role": "user", "content": user_prompt}],
+        "stream": True,
     }
     async with httpx.AsyncClient(base_url=model.base_url, timeout=90.0) as client:
-        response = await client.post("/v1/messages", headers=headers, json=payload)
-        response.raise_for_status()
-        blocks = response.json().get("content", [])
-        texts = [b.get("text", "") for b in blocks if b.get("type") == "text"]
-        return "\n".join(texts).strip()
+        async with client.stream("POST", "/v1/messages", headers=headers, json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                try:
+                    event = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") == "content_block_delta":
+                    delta = event.get("delta", {})
+                    if delta.get("type") == "text_delta" and delta.get("text"):
+                        yield delta["text"]
